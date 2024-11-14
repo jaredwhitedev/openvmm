@@ -57,6 +57,11 @@ pub fn hv_cpuid_leaves(
             //     .with_fast_hypercall_output(true);
         }
 
+        if isolation == IsolationType::Tdx {
+            // Some guests require enhanced idle for tick skipping support
+            privileges = privileges.with_access_guest_idle_msr(true);
+        }
+
         u64::from(privileges)
     };
 
@@ -103,6 +108,11 @@ pub fn hv_cpuid_leaves(
 
                 // TODO SNP
                 //    .with_fast_hypercall_output_available(true);
+            }
+
+            if isolation == IsolationType::Tdx {
+                // Some guests require enhanced idle for tick skipping support
+                features = features.with_guest_idle_available(true);
             }
 
             if cfg!(guest_arch = "x86_64") && hardware_isolated.is_some() {
