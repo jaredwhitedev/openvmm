@@ -51,15 +51,12 @@ pub fn hv_cpuid_leaves(
                 .with_access_vsm(access_vsm)
                 // TODO GUEST_VSM: Not actually implemented yet, but this is
                 // needed for guest vsm bringup
-                .with_enable_extended_gva_ranges_flush_va_list(access_vsm);
+                .with_enable_extended_gva_ranges_flush_va_list(access_vsm)
+                // Some guests require enhanced idle for tick skipping support
+                .with_access_guest_idle_msr(true);
 
             // TODO SNP:
             //     .with_fast_hypercall_output(true);
-        }
-
-        if isolation == IsolationType::Tdx {
-            // Some guests require enhanced idle for tick skipping support
-            privileges = privileges.with_access_guest_idle_msr(true);
         }
 
         u64::from(privileges)
@@ -104,15 +101,12 @@ pub fn hv_cpuid_leaves(
                     // TODO GUEST_VSM: flush virtual address list is not
                     // actually implemented yet, but this is needed for guest
                     // vsm bringup
-                    .with_extended_gva_ranges_for_flush_virtual_address_list_available(access_vsm);
+                    .with_extended_gva_ranges_for_flush_virtual_address_list_available(access_vsm)
+                    // Some guests require enhanced idle for tick skipping support
+                    .with_guest_idle_available(true);
 
                 // TODO SNP
                 //    .with_fast_hypercall_output_available(true);
-            }
-
-            if isolation == IsolationType::Tdx {
-                // Some guests require enhanced idle for tick skipping support
-                features = features.with_guest_idle_available(true);
             }
 
             if cfg!(guest_arch = "x86_64") && hardware_isolated.is_some() {
