@@ -933,8 +933,8 @@ impl UhProcessor<'_, TdxBacked> {
             self.runner.tdx_enter_guest_state_mut().rvi = rvi;
         }
 
-        // If there is a pending interrupt, clear the halted state.
-        if self.backing.lapic.halted
+        // If there is a pending interrupt, clear the halted and idle state.
+        if (self.backing.lapic.halted || self.backing.lapic.idle)
             && self.backing.lapic.lapic.is_offloaded()
             && self.runner.tdx_enter_guest_state().rvi != 0
         {
@@ -951,6 +951,7 @@ impl UhProcessor<'_, TdxBacked> {
             // Hyper-V in general does not guarantee hlt will stick until an
             // interrupt is pending), at worst this will just burn some CPU.
             self.backing.lapic.halted = false;
+            self.backing.lapic.idle = false;
         }
 
         Ok(true)
@@ -1021,6 +1022,8 @@ impl UhProcessor<'_, TdxBacked> {
         processor_controls: &mut ProcessorControls,
         tpr_threshold: &mut u8,
     ) {
+        // Exit idle when an interrupt is received, regardless of IF
+        self.backing.lapic.idle = false;
         // If there is a higher-priority pending event of some kind, then
         // just request an exit after it has resolved, after which we will
         // try again.
@@ -1062,6 +1065,8 @@ impl UhProcessor<'_, TdxBacked> {
     }
 
     fn handle_nmi(&mut self, processor_controls: &mut ProcessorControls) {
+        // Exit idle when an interrupt is received, regardless of IF
+        self.backing.lapic.idle = false;
         // If there is a higher-priority pending event of some kind, then
         // just request an exit after it has resolved, after which we will
         // try again.
@@ -1119,6 +1124,7 @@ impl UhProcessor<'_, TdxBacked> {
             self.runner.tdx_enter_guest_state_mut().rip = 0;
             self.backing.lapic.startup_suspend = false;
             self.backing.lapic.halted = false;
+            self.backing.lapic.idle = false;
         }
     }
 
@@ -1164,7 +1170,10 @@ impl UhProcessor<'_, TdxBacked> {
         let tlb_halt = self.should_halt_for_tlb_unlock(GuestVtl::Vtl0);
 
         self.runner.set_halted(
-            self.backing.lapic.halted || self.backing.lapic.startup_suspend || tlb_halt,
+            self.backing.lapic.halted
+                || self.backing.lapic.idle
+                || self.backing.lapic.startup_suspend
+                || tlb_halt,
         );
 
         // TODO GUEST_VSM: Probably need to set this to 2 occasionally
@@ -1352,7 +1361,7 @@ impl UhProcessor<'_, TdxBacked> {
                     .or_else_if_unknown(|| self.read_msr_cvm(msr, intercepted_vtl))
                     .or_else_if_unknown(|| match msr {
                         hvdef::HV_X64_MSR_GUEST_IDLE => {
-                            self.backing.lapic.halted = true;
+                            self.backing.lapic.idle = true;
                             Ok(0)
                         }
                         _ => Err(MsrError::Unknown),
@@ -2727,6 +2736,8 @@ impl AccessVpState for UhVpStateAccess<'_, '_, TdxBacked> {
             vp::MpState::WaitForSipi
         } else if self.vp.backing.lapic.halted {
             vp::MpState::Halted
+        } else if self.vp.backing.lapic.idle {
+            vp::MpState::Idle
         } else {
             vp::MpState::Running
         };
@@ -2759,9 +2770,10 @@ impl AccessVpState for UhVpStateAccess<'_, '_, TdxBacked> {
             vp::MpState::Running => (false, false),
             vp::MpState::WaitForSipi => (false, true),
             vp::MpState::Halted => (true, false),
-            vp::MpState::Idle => (false, false), // TODO TDX: idle support
+            vp::MpState::Idle => (false, false),
         };
         self.vp.backing.lapic.halted = halted;
+        self.vp.backing.lapic.idle = mp_state == vp::MpState::Idle;
         self.vp.backing.lapic.startup_suspend = startup_suspend;
         self.vp.backing.lapic.nmi_pending = nmi_pending;
         let interruptibility = Interruptibility::new()
